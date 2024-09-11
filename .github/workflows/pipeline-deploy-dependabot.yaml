@@ -1,0 +1,146 @@
+name: Pipeline Dependabot Deployment to Dev and Test Environment
+on:
+  pull_request:
+    types: [ labeled ]
+jobs:
+  metadata:
+    name: "Get Metadata"
+    if: ${{ github.event.label.name == 'Test Ready' && startswith(github.head_ref, 'dependabot/') }}
+    uses: NHSDigital/uec-dos-management/.github/workflows/metadata.yaml@task/DR-800_Dependabot_pull_requests
+  quality-check:
+    name: "Quality Check"
+    uses: NHSDigital/uec-dos-management/.github/workflows/quality-checks.yaml@task/DR-800_Dependabot_pull_requests
+    needs:
+      [
+        metadata,
+      ]
+    with:
+      environment: dev
+      workspace: ${{ needs.metadata.outputs.workspace }}
+      stacks: '["github-runner", "terraform_management", "application", "ui-test"]'
+    secrets: inherit
+
+  deploy-application-infrastructure-dev:
+      needs:
+        [
+          quality-check,
+          metadata,
+        ]
+      uses: NHSDigital/uec-dos-management/.github/workflows/deploy-infrastructure.yaml@task/DR-800_Dependabot_pull_requests
+      with:
+        environment: dev
+        domain: "uec-cm"
+        project: cm
+        workspace: ${{ needs.metadata.outputs.workspace }}
+        stacks: '["application", "ui-test"]'
+        action: apply
+        workflow_timeout: 10
+      secrets: inherit
+
+  build-and-push-react-artefacts:
+    name: Build react app and push built artefact to s3 bucket
+    needs: [
+      metadata,
+      deploy-application-infrastructure-dev,
+    ]
+    uses: NHSDigital/uec-dos-management/.github/workflows/build-react-app.yaml@task/DR-800_Dependabot_pull_requests
+    with:
+      environment: dev
+      workspace: ${{ needs.metadata.outputs.workspace }}
+      domain: uec-cm
+      commit_hash: ${{ needs.metadata.outputs.commit_hash }}
+      artefact_bucket_name: ${{ needs.metadata.outputs.artefact_bucket_name }}
+    permissions:
+      id-token: write
+      contents: read
+    secrets: inherit
+
+  deploy-react-app-dev:
+    name: Retrieve built artefact and deploy to dev front end s3 bucket
+    needs: [
+      metadata,
+      deploy-application-infrastructure-dev,
+      build-and-push-react-artefacts,
+    ]
+    uses: NHSDigital/uec-dos-management/.github/workflows/deploy-react-app.yaml@task/DR-800_Dependabot_pull_requests
+    with:
+      environment: dev
+      workspace: ${{ needs.metadata.outputs.workspace }}
+      domain: uec-cm
+      artefact_sub_dir: ${{ needs.metadata.outputs.workspace }}
+      commit_hash: ${{ needs.metadata.outputs.commit_hash }}
+      artefact_bucket_name: ${{ needs.metadata.outputs.artefact_bucket_name }}
+    permissions:
+      id-token: write
+      contents: read
+    secrets: inherit
+
+  deploy-application-infrastructure-test:
+    needs:
+      [
+        quality-check,
+        metadata,
+      ]
+    uses: NHSDigital/uec-dos-management/.github/workflows/deploy-infrastructure.yaml@task/DR-800_Dependabot_pull_requests
+    with:
+      environment: test
+      domain: "uec-cm"
+      project: cm
+      workspace: ${{ needs.metadata.outputs.workspace }}
+      stacks: '["application", "ui-test"]'
+      action: apply
+      workflow_timeout: 10
+    secrets: inherit
+
+  deploy-react-app-test:
+    name: Retrieve built artefact and deploy to test front end s3 bucket
+    needs: [
+      metadata,
+      deploy-application-infrastructure-dev,
+      build-and-push-react-artefacts,
+      deploy-react-app-dev,
+    ]
+    uses: NHSDigital/uec-dos-management/.github/workflows/deploy-react-app.yaml@task/DR-800_Dependabot_pull_requests
+    with:
+      environment: test
+      workspace: ${{ needs.metadata.outputs.workspace }}
+      domain: uec-cm
+      artefact_sub_dir: ${{ needs.metadata.outputs.workspace }}
+      commit_hash: ${{ needs.metadata.outputs.commit_hash }}
+      artefact_bucket_name: ${{ needs.metadata.outputs.artefact_bucket_name }}
+    permissions:
+      id-token: write
+      contents: read
+    secrets: inherit
+
+  ui-test:
+    needs:
+      [
+        metadata,
+        deploy-application-infrastructure-test,
+        deploy-react-app-test,
+      ]
+    name: Run ui tests
+    uses: NHSDigital/uec-dos-management/.github/workflows/ui-test.yaml@task/DR-800_Dependabot_pull_requests
+    with:
+      environment: test
+      workspace: ${{ needs.metadata.outputs.workspace }}
+      tag: ${{ needs.metadata.outputs.commit_hash }}
+    secrets: inherit
+
+  slack-notifications:
+    name: Send notification to slack
+    needs: [
+      metadata,
+      quality-check,
+      deploy-application-infrastructure-dev,
+      build-and-push-react-artefacts,
+      deploy-react-app-dev,
+      deploy-application-infrastructure-test,
+      deploy-react-app-test,
+    ]
+    if: always()
+    uses: NHSDigital/uec-dos-management/.github/workflows/slack-notifications.yaml@task/DR-800_Dependabot_pull_requests
+    with:
+      env: dev
+    secrets: inherit
