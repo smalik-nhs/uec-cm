@@ -44,7 +44,7 @@ jobs:
       metadata,
       deploy-application-infrastructure,
     ]
-    uses: NHSDigital/uec-dos-management/.github/workflows/build-react-app.yaml@latest
+    uses: NHSDigital/uec-dos-management/.github/workflows/build-react-app.yaml@task/DR-1117_Add_static_code_analysis_to_build_react_app
     with:
       environment: dev
       workspace: ${{ needs.metadata.outputs.workspace }}
