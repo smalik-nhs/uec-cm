@@ -88,6 +88,7 @@ const AccountPermissions: React.FC = () => {
                   </summary>
                   <div className="nhsuk-details__text">
                     {/* Add any additional permissions information here */}
+                    <span>test text</span>
                   </div>
                 </details>
                 <div className="nhsuk-radios">
